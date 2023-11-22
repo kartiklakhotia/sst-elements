@@ -16,6 +16,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <vector>
+#include <unordered_set>
+#include <unordered_map>
 #include <algorithm>
 #include <stdlib.h>
 #include <iostream>
@@ -141,9 +143,12 @@ public:
     };
 
     int router_id;
+    int r, rp;
     int d;
     int pfq;
     int snq;
+    int pfV;
+    int snV;
     std::string sn_type;
 
     int hosts_per_router;
@@ -167,6 +172,16 @@ public:
     int adaptive_bias;
 
     std::vector<std::vector<int>> polar;
+    std::vector<int> phi;
+    std::vector<int> phi_inv;
+
+    std::vector<int> pf_2h_paths;
+    std::vector<int> pf_1h_paths;
+
+    std::unordered_set<int> sn_adj;
+    std::unordered_set<int> pf_adj;
+    std::unordered_map<int, int> router_adj;
+
 
     //For now, doing this in a very dumb way, need to figure out a right way to do it with an vector array of statistics
     Statistic<uint32_t>* hopcount1;
@@ -223,6 +238,16 @@ private:
    void setOutputQueueLengthsArray(int const* array, int vcs);
    void setOutputBufferCreditArray(int const* array, int vcs); 
 
+   void read_phi(std::string &, std::vector<int> &);
+   void read_graph(std::string &, std::vector<std::vector<int>> &);
+
+   int coordsToId(int x, int xp);
+   std::tuple<int, int> idToCoords(int n);
+
+   int minrouter_ps_iq(int dest);
+   int minrouter_ps_paley(int dest);
+   int minrouter_ps(int dest);
+   int minport_ps(int dest);
 };
 
 }

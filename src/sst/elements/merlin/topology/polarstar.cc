@@ -82,7 +82,7 @@ topo_polarstar::topo_polarstar(ComponentId_t cid, Params& params, int num_ports,
     hopcount6 = registerStatistic<uint32_t>("hopcount6");
 
 
-    adaptive_bias   = 33;
+    adaptive_bias   = 0;
 
 }
 
@@ -102,23 +102,24 @@ void topo_polarstar::routeMinimal(int port, int vc, internal_router_event* ev){
     // Get the node ID of the destination router
     int dest_node = getRouterID(ev->getDest());
 
-    int out_channel;
 
     topo_polarstar_event *tt_ev = static_cast<topo_polarstar_event*>(ev);
+
+    int out_channel = this->minport_ps(ev->getDest());
+    tt_ev->setNextPort(out_channel);
 
     if (dest_node == router_id){
 	//If we reached the destination node, dump the no of switch hops the packet took in total
         dumpHopCount(tt_ev);
 
-        out_channel = getDestLocalPort(ev->getDest());
+        //out_channel = getDestLocalPort(ev->getDest());
 
-        tt_ev->setNextPort(out_channel);
         tt_ev->setVC(0);
     }
     else{
-        out_channel = route_table[dest_node] + hosts_per_router;
-
-        tt_ev->setNextPort(out_channel);
+        //out_channel = route_table[dest_node] + hosts_per_router;
+        //out_channel = route_table[dest_node] + hosts_per_router;
+        //tt_ev->setNextPort(out_channel);
 
         if (tt_ev->hop_count == 0)
             tt_ev->setVC(0);
@@ -166,7 +167,8 @@ void topo_polarstar::routeValiant(int port, int vc, internal_router_event* ev){
             tt_ev->valiant      = valiant;
             tt_ev->non_minimal  = true;
 
-            out_channel = route_table[valiant] + hosts_per_router;
+            //out_channel = route_table[valiant] + hosts_per_router;
+            out_channel = this->minport_ps(valiant*this->hosts_per_router);
 
             tt_ev->setNextPort(out_channel);
             assert(tt_ev->hop_count < 1);
@@ -175,9 +177,10 @@ void topo_polarstar::routeValiant(int port, int vc, internal_router_event* ev){
         //if you've reached the intermediate valiant node, proceed to destination along the shortest path
         else if (tt_ev->valiant==router_id || (!tt_ev->non_minimal))
         {
-            minimal_channel     = route_table[dest_node];
+            //minimal_channel     = route_table[dest_node];
+            //out_channel         = minimal_channel + hosts_per_router;
+            out_channel     = this->minport_ps(dest_node*this->hosts_per_router);
             tt_ev->non_minimal  = false;
-            out_channel         = minimal_channel + hosts_per_router;
             tt_ev->setNextPort(out_channel); 
 
             assert(tt_ev->hop_count < 6);
@@ -186,8 +189,9 @@ void topo_polarstar::routeValiant(int port, int vc, internal_router_event* ev){
         //If the current router is not where the packet started, first check the minimal path
         else {
 
-            minimal_channel     = route_table[tt_ev->valiant];
-            out_channel         = minimal_channel + hosts_per_router;
+            //minimal_channel     = route_table[tt_ev->valiant];
+            //out_channel         = minimal_channel + hosts_per_router;
+            out_channel     = this->minport_ps(tt_ev->valiant*this->hosts_per_router);
 
             tt_ev->setNextPort(out_channel);
 
@@ -225,20 +229,22 @@ void topo_polarstar::routeUgal(int port, int vc, internal_router_event* ev){
     else if (port < hosts_per_router)
     {
         //minpath details
-        int min_channel = route_table[dest_node] + hosts_per_router;
+        //int min_channel = route_table[dest_node] + hosts_per_router;
+        int min_channel = this->minport_ps(dest_node*this->hosts_per_router);
         int min_queue   = output_queue_lengths[min_channel*num_vcs + out_vc];
 
         //find valiant intermediate node
         int valiant, val_channel;
         int val_queue   = std::numeric_limits<int>::max();
-        int num_tries   = 4;
+        int num_tries   = 1;
         for (int i=0; i<num_tries; i++)
         {
             int candidate, candidate_channel;
             do
             {
                 candidate   = rng->generateNextUInt32() % total_routers;
-                candidate_channel   = route_table[candidate] + hosts_per_router;
+                //candidate_channel   = route_table[candidate] + hosts_per_router;
+                candidate_channel   = this->minport_ps(candidate*this->hosts_per_router);
             } while((candidate == router_id) || (candidate_channel == min_channel));
             int candidate_queue     = output_queue_lengths[candidate_channel*num_vcs + out_vc];
             if (val_queue > candidate_queue)
@@ -266,13 +272,15 @@ void topo_polarstar::routeUgal(int port, int vc, internal_router_event* ev){
     }
     else if ((tt_ev->valiant == router_id && tt_ev->non_minimal) || (!tt_ev->non_minimal))
     {
-        out_channel         = route_table[dest_node] + hosts_per_router;
+        //out_channel         = route_table[dest_node] + hosts_per_router;
+        out_channel         = this->minport_ps(dest_node*this->hosts_per_router);
         tt_ev->non_minimal  = false;
         assert(tt_ev->hop_count < 6);
     }
     else
     {
-        out_channel         = route_table[tt_ev->valiant] + hosts_per_router;
+        //out_channel         = route_table[tt_ev->valiant] + hosts_per_router;
+        out_channel         = this->minport_ps(tt_ev->valiant*this->hosts_per_router);
         assert(tt_ev->hop_count < 3);
     }
 
@@ -282,22 +290,19 @@ void topo_polarstar::routeUgal(int port, int vc, internal_router_event* ev){
 }
 
 
-
-
-
-void topo_polarstar::initPolarGraph() {
-    char dir[256];
-    getcwd(dir, 256); 
-    std::string filepath    = std::string(dir) + "/polarstar_data/PolarStar.d_" + 
-                            std::to_string(this->d) + "_pfq_" + std::to_string(this->pfq) + 
-                            + "_sn_" + this->sn_type +
-                            "_snq_" + std::to_string(this->snq) + ".txt";
-
+void topo_polarstar::read_graph(std::string &filepath, std::vector<std::vector<int>> &graph)
+{
     std::fstream fp;
     fp.open(filepath.c_str(), std::ios::in);
+    if(!fp.is_open())
+    {
+      printf("ERROR: failed to open %s\n", filepath.c_str());
+      exit(-1);
+    }
 
     std::string line;
     int line_no = 0;
+
     int fV, fE, v;
     while(std::getline(fp, line))
     {
@@ -309,14 +314,138 @@ void topo_polarstar::initPolarGraph() {
         }
         else
         {
-            this->polar.push_back(std::vector<int>());
+            graph.push_back(std::vector<int>());
             int u   = line_no - 1;
             while(iss >> v)
-                this->polar[u].push_back(v);
+                graph[u].push_back(v);
         }
         line_no += 1;
     }
     fp.close();
+}
+
+void topo_polarstar::read_phi(std::string &filepath, std::vector<int> &phi)
+{
+    std::fstream fp;
+    fp.open(filepath.c_str(), std::ios::in);
+    if(!fp.is_open())
+    {
+      printf("ERROR: failed to open %s\n", filepath.c_str());
+      exit(-1);
+    }
+
+    std::string line;
+    int line_no = 0;
+
+    int fV, v;
+    while(std::getline(fp, line))
+    {
+        std::istringstream iss(line);
+        if (line_no == 0)
+            iss>>fV; 
+        else
+        {
+            while(iss >> v)
+                phi.push_back(v);
+        }
+        line_no += 1;
+    }
+    fp.close();
+
+    this->phi_inv.resize(this->phi.size());
+    for (int i=0; i<this->phi.size(); i++)
+        this->phi_inv[this->phi[i]] = i;
+}
+
+
+
+void topo_polarstar::initPolarGraph() {
+    char dir[256];
+    getcwd(dir, 256); 
+    std::string filepath    = std::string(dir) + "/polarstar_data/PolarStar.d_" + 
+                            std::to_string(this->d) + "_pfq_" + std::to_string(this->pfq) + 
+                            + "_sn_" + this->sn_type +
+                            "_snq_" + std::to_string(this->snq) + ".txt";
+    read_graph(filepath, this->polar);
+
+    std::vector<std::vector<int>> pf;
+    filepath            = std::string(dir) + "/polarstar_data/pf_PolarStar.d_" + 
+                            std::to_string(this->d) + "_pfq_" + std::to_string(this->pfq) + 
+                            + "_sn_" + this->sn_type +
+                            "_snq_" + std::to_string(this->snq) + ".txt";
+    read_graph(filepath, pf);
+
+    std::vector<std::vector<int>> sn;
+    filepath            = std::string(dir) + "/polarstar_data/sn_PolarStar.d_" + 
+                            std::to_string(this->d) + "_pfq_" + std::to_string(this->pfq) + 
+                            + "_sn_" + this->sn_type +
+                            "_snq_" + std::to_string(this->snq) + ".txt";
+    read_graph(filepath, sn);
+
+    filepath            = std::string(dir) + "/polarstar_data/phi_PolarStar.d_" + 
+                            std::to_string(this->d) + "_pfq_" + std::to_string(this->pfq) + 
+                            + "_sn_" + this->sn_type +
+                            "_snq_" + std::to_string(this->snq) + ".txt";
+    read_phi(filepath, this->phi);
+
+    this->pfV = pf.size();
+    this->snV = this->phi.size();
+    if (this->sn_type.compare("iq")==0)
+        assert(snV==2*this->snq+2);
+    else if (this->sn_type.compare("paley")==0)
+        assert(snV==this->snq);
+    else
+    {
+        if (snV%2 == 0)
+        {
+            this->sn_type   = "iq";
+            assert(snV==2*this->snq+2);
+        }
+        else
+        {
+            this->sn_type   = "paley";
+            assert(snV==this->snq);
+        }
+    }
+    assert(snV==sn.size());
+    assert(pfV==this->pfq*this->pfq + this->pfq + 1);
+    assert(snV*pfV==this->total_routers);
+
+    ///////////////////////////////////////////////////
+    ////// Populate data structures for routing ///////
+    ///////////////////////////////////////////////////
+    int u, up;
+    std::tie(u,up)      = this->idToCoords(this->router_id);
+
+    this->pf_1h_paths   = pf[u];
+    assert(this->pf_1h_paths.size() == this->pfq+1);
+
+    this->pf_2h_paths.resize(this->pfV, -1);
+    
+    assert(pf[u].size()==this->pfq+1);
+    for (auto neigh : pf[u])
+    {
+        this->pf_adj.insert(neigh);
+        for (auto v : pf[neigh])
+        {
+            if (u==v) continue;
+            assert(this->pf_2h_paths[v] < 0);
+            this->pf_2h_paths[v] = neigh;
+        }
+    }
+    for (int v=0; v<this->pfV; v++)
+        assert(this->pf_2h_paths[v]>=0 || u==v);
+
+    for (auto neigh : sn[up])
+        this->sn_adj.insert(neigh);
+
+    for (int i=0; i<this->polar[this->router_id].size(); i++)
+        this->router_adj[this->polar[this->router_id][i]] = i;
+
+    this->r = u;
+    this->rp= up;
+
+    //TODO: Do we need polar, pf, sn at all routers??
 }
 
 
@@ -621,3 +750,165 @@ void topo_polarstar::dumpHopCount(topo_polarstar_event* tt_ev){
             hopcount6->addData(1);
 	}
 }
+
+
+/////////////////////////////////////////////////////////////////////////////
+/////////////////// POLARSTAR ROUTING UTILITY FUNCTIONS /////////////////////
+/////////////////////////////////////////////////////////////////////////////
+int topo_polarstar::coordsToId(int x, int xp)
+{
+    assert(x < this->pfV);
+    assert(xp < this->snV);
+    return x*this->snV + xp;
+}
+
+std::tuple<int, int> topo_polarstar::idToCoords(int n)
+{
+    assert(n < this->total_routers);
+    int x   = n/this->snV;
+    int xp  = n%this->snV;
+    return std::make_tuple(x, xp);
+}
+
+
+
+int topo_polarstar::minrouter_ps_iq(int dest)
+{
+    int psY = dest/this->hosts_per_router;
+
+    int y, z, yp, zp, psZ;
+    std::tie(y,yp)  = this->idToCoords(psY);
+
+    bool neighs_in_pf       = (this->pf_adj.find(y) != this->pf_adj.end());
+    bool neighs_in_sn       = (this->sn_adj.find(yp) != this->sn_adj.end());
+    bool neighs_in_ps       = (this->router_adj.find(psY) != this->router_adj.end());
+
+    //random adjacent supernode. Replace by adjacent supernode with least congested direct path
+    //TODO: use a better random number generator
+    int best_adj_sn         = this->pf_1h_paths[rand()%(pfq+1)];
+    int comm_sn             = this->pf_2h_paths[y];
+
+    if (this->router_id==psY)
+        return psY;
+    else if (neighs_in_ps)
+        return psY;
+    else if (this->r==y && !neighs_in_pf)
+    {
+        z   = best_adj_sn;
+        zp  = this->phi[this->rp];
+    }
+    else if (neighs_in_pf)
+    {
+        assert(yp !=  this->phi[this->rp]);
+        if (this->rp == yp)
+        {
+            z   = comm_sn;
+            zp  = this->phi[this->rp];
+        }
+        else if (this->sn_adj.find(phi[yp]) != this->sn_adj.end())
+        {
+            z   = this->r;
+            zp  = this->phi[yp];
+        }
+        else
+        {
+            z   = y;
+            zp  = this->phi[this->rp];
+        }
+    }
+    else
+    {
+        zp      = this->phi[this->rp];
+        if (yp == this->phi[this->rp])
+            z   = best_adj_sn;
+        else
+            z   = comm_sn;
+    }
+    psZ = this->coordsToId(z,zp);
+    //printf("x=%d, comm_sn=%d, xp=%d, z=%d, zp=%d, psZ=%d\n", x, comm_sn, xp, z, zp);
+    assert(this->router_adj.find(psZ) != this->router_adj.end());
+    return psZ;
+}
+
+//TODO: Implement Paley
+int topo_polarstar::minrouter_ps_paley(int dest)
+{
+    int psY = dest/this->hosts_per_router;
+
+    int y, z, yp, zp, psZ;
+    std::tie(y,yp)  = this->idToCoords(psY);
+
+    bool neighs_in_pf       = (this->pf_adj.find(y) != this->pf_adj.end());
+    bool neighs_in_sn       = (this->sn_adj.find(yp) != this->sn_adj.end());
+    bool neighs_in_ps       = (this->router_adj.find(psY) != this->router_adj.end());
+
+    //random adjacent supernode. Replace by adjacent supernode with least congested direct path
+    //TODO: use a better random number generator
+    int best_adj_sn         = this->pf_1h_paths[rand()%(pfq+1)];
+    while (best_adj_sn==this->r)
+        best_adj_sn         = this->pf_1h_paths[rand()%(pfq+1)];
+    int comm_sn             = this->pf_2h_paths[y];
+
+    if (this->router_id==psY)
+        return psY;
+    else if (neighs_in_ps)
+        return psY;
+    else if (this->r==y)
+    {
+        z   = best_adj_sn;
+        if (this->r < z)
+            zp  = this->phi[this->rp];
+        else
+            zp  = this->phi_inv[this->rp];
+    }
+    else if (neighs_in_pf)
+    {
+        int yp_img  = (this->r < y) ? this->phi_inv[yp] : this->phi[yp];
+        int rp_img  = (this->r < y) ? this->phi[this->rp] : this->phi_inv[this->rp];
+        if (this->sn_adj.find(yp_img) != sn_adj.end())
+        {
+            z   = r;
+            zp  = yp_img;
+        }
+        else
+        {
+            z   = y;
+            zp  = rp_img;
+        }
+    }
+    else
+    {
+        z   = comm_sn;
+        zp  = (this->r < z) ? this->phi[rp] : this->phi_inv[rp];
+    }
+
+    psZ = this->coordsToId(z,zp);
+    assert(this->router_adj.find(psZ) != this->router_adj.end());
+    return psZ;
+}
+
+int topo_polarstar::minrouter_ps(int dest)
+{
+    if (this->sn_type.compare("iq")==0)
+        return minrouter_ps_iq(dest);
+    else
+        return minrouter_ps_paley(dest);
+}
+
+/////////////////////////////////////////////////////////////////////
+////////////////// FIND OUTPUT PORT FOR MINPATH /////////////////////
+/////////////////////////////////////////////////////////////////////
+int topo_polarstar::minport_ps(int dest)
+{
+    int psY         = dest/this->hosts_per_router;
+
+    if (this->router_id==psY)
+        return this->getDestLocalPort(dest);
+    else
+        return this->hosts_per_router + router_adj[this->minrouter_ps(dest)];
+}
+
+
+
+
+

@@ -340,7 +340,7 @@ class topoPolarStar(Topology):
     """
     Parameters:
         d       : degree
-        sn      : ennum {max, iq, paley}
+        sn      : enum {max, iq, paley}
         pfq     : prime power for ER graphs, <0 implies optimize for scale
         snq     : parameter 'q' for supernode graphs, <0 implies optimize for scale
         N       : number of routers
@@ -349,7 +349,7 @@ class topoPolarStar(Topology):
         print("PolarStar Topology Constructor!")
         Topology.__init__(self)
         self._declareClassVariables(["link_latency", "host_link_latency", "global_link_map", "bundleEndpoints"])
-        self._declareParams("main",["topo","phi","d","sn_type","pfq","snq","pfV", "snV", "phi", "hosts_per_router","network_radix","total_radix","total_routers",
+        self._declareParams("main",["topo","phi","adj_pf","adj_sn","d","sn_type","pfq","snq","pfV", "snV", "phi", "hosts_per_router","network_radix","total_radix","total_routers",
                                     "total_endnodes","edge","name","algorithm","adaptive_threshold","global_routes","config_failed_links",
                                     "failed_links"])
         self.global_routes      = "absolute"
@@ -383,6 +383,8 @@ class topoPolarStar(Topology):
         self.name               = "PolarStar"
         self.topo               = None
         self.phi                = None
+        self.adj_sn             = None
+        self.adj_pf             = None
         self.hosts_per_router   = None
         self.total_radix        = None 
         self.total_endnodes     = None 
@@ -425,7 +427,7 @@ class topoPolarStar(Topology):
 
     def make(self):
         if self.topo is None:
-            self.topo   = self.starProd(self.pfq, self.snq, self.sn_type)
+            self.topo, self.adj_pf, self.adj_sn, self.phi   = self.starProd(self.pfq, self.snq, self.sn_type)
 
         return self.topo
 
@@ -488,20 +490,34 @@ class topoPolarStar(Topology):
             self.save(folderpath, filename)
 
 
+    def write_graph(self, filename, G):
+        with open(filename, "w") as f:
+            print(len(G), sum(len(n) for n in G)//2, file=f)
+            for node in G:
+                print( " ".join(str(e) for e in node) + " ", file=f)
+
+    def write_phi(self, filename):
+        with open(filename, "w") as f:
+            print(len(self.phi), file=f)
+            for i in range(len(self.phi)):
+                print(self.phi[i], file=f)
 
     def save(self, folderpath, filename):
 
         if not os.path.exists(folderpath):
             os.makedirs(folderpath)
 
+        fn    = folderpath + filename + ".txt"
+        self.write_graph(fn, self.topo)
 
-        file    = folderpath + filename
-        with open(file+".txt", "w") as f:
-            print(len(self.topo), sum(len(n) for n in self.topo)//2, file=f)
-            for node in self.topo:
-                print( " ".join(str(e) for e in node) + " ", file=f)
+        fn    = folderpath + "pf_" + filename + ".txt"
+        self.write_graph(fn, self.adj_pf)
 
+        fn    = folderpath + "sn_" + filename + ".txt"
+        self.write_graph(fn, self.adj_sn)
 
+        fn    = folderpath + "phi_" + filename + ".txt"
+        self.write_phi(fn)
 
 
     #derive the degree distribution between supenrode (joiner) and structure (PF) graphs with largest config
@@ -561,11 +577,12 @@ class topoPolarStar(Topology):
     def starProd(self, pfq, snq, sn):
         snG         = Paley(snq) if (sn=="paley") else IQ(snq)
         phi, adj_sn = snG.make()
-        snV         = len(adj_sn)
+        snV               = len(adj_sn)
 
         pfG         = topoPolarFly(q=pfq) 
         adj_pf      = pfG.make()
         pfV         = len(adj_pf)    
+
 
         #add self-loops to PF quadrics
         num_quads   = 0 
@@ -597,7 +614,7 @@ class topoPolarStar(Topology):
                     v   = j*snV + phi[u_off]
                     #add edge (i,u) -> (j,phi[u]) if i<j
                     #if (i==j), add at most one edge corresponding to the self loop
-                    if ((i < j) or ((i==j) and (not cov[u_off]) and (not cov[phi[u_off]]) and u!=v)):
+                    if ((i < j) or ((i==j) and (not cov[u_off]) and (not cov[phi[u_off]]) and u!=v and self.sn_type!="paley")):
                         adj_ps[u].append(v)
                         adj_ps[v].append(u)
                         if (i==j):
@@ -607,7 +624,8 @@ class topoPolarStar(Topology):
         for u in range(psV):
             adj_ps[u].sort()
 
-        return adj_ps
+
+        return adj_ps, adj_pf, adj_sn, phi
     
     
     def build(self, endpoint):
