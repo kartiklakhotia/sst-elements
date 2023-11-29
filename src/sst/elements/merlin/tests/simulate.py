@@ -49,10 +49,17 @@ parser_ft.add_argument('-sh', dest='shape', type=str, required=True, help='fattr
 parser_ft.add_argument('-rf', dest='rf', type=str, choices=['deterministic', 'adaptive'], default='deterministic', help='routing function')  
 topology_parsers.append(parser_ft)
 
+#HyperX
+parser_hx       = subparser.add_parser('hyperx', help='simulates hyperx')
+parser_hx.add_argument('-sh', dest='shape', type=str, required=True, help='hyperx shape (e.g. 4x4x4)')
+parser_hx.add_argument('-rf', dest='rf', type=str, choices=["DOR", "MIN-A"], default="DOR", help='routing function')
+parser_hx.add_argument('-w', dest='w', type=str, required=True, help='width of links in each dimension (eg.g. 2x1x2)')
+topology_parsers.append(parser_hx)
+
 for sub in topology_parsers:
     sub.add_argument('-sat', dest='sat', type=float, default=1000, help='saturation latency cutoff (in ns)')
     sub.add_argument('-o', dest='opfile', type=str, required=True, help='output csv file')
-    sub.add_argument('-k', dest='k', type=int, help='num endpoints per router')
+    sub.add_argument('-k', dest='k', type=int, help='num endpoints per router (not needed for fat-tree)')
     sub.add_argument('-fm', dest='fine_max', type=float, help='maxmimum value for fine grained simulations')
     sub.add_argument('-t', dest='traffic', type=str, choices=['UNIFORM', 'SHIFT'], required=True, help='traffic pattern')
     sub.add_argument('-cstep', dest='coarse_incr', type=float, default=0.1, help='coarse simulation step (load increments)')
@@ -108,6 +115,7 @@ def generate_config_file(args, load, template, output):
     load_str= 'specified_load=' 
     k_str   = 'specified_k='
     shp_str = 'specified_shape='
+    w_str   = 'specified_width='
     
     if (args.topo == 'polarfly'):
         q       = args.q
@@ -118,6 +126,8 @@ def generate_config_file(args, load, template, output):
         k       = args.k if args.k is not None else q//3
     elif (args.topo == 'fattree'):
         pass
+    elif (args.topo == 'hyperx'):
+        k       = args.k
     else:
         raise Exception("I do not understand how to simulate " + args.topo)
 
@@ -130,6 +140,8 @@ def generate_config_file(args, load, template, output):
                 opline  = line.replace(q_str, q_str+str(q))
         elif shp_str in line:
             opline  = line.replace(shp_str, shp_str+"'"+args.shape+"'")
+        elif w_str in line:
+            opline  = line.replace(w_str, w_str+"'"+args.w+"'")
         elif rf_str in line:
             opline  = line.replace(rf_str, rf_str+"'"+args.rf+"'")
         elif load_str in line:
